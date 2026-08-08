@@ -1,4 +1,4 @@
-name: Build Godot Web Minimal (with ccache & diagnostics)
+name: Build Godot Web Minimal (WeChat Compatible)
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: godotengine/godot
-          ref: 4.7.1-stable          # ⚠️ 请确认该版本标签存在，可替换为如 4.6.1-stable
+          ref: 4.7.1-stable          # ⚠️ 如果此标签不存在，可更换为实际存在的稳定标签，如 4.6.1-stable
           submodules: recursive
 
       - name: Install dependencies
@@ -47,23 +47,24 @@ jobs:
           source "${EMSDK_ROOT}/emsdk_env.sh"
           scons platform=web target=template_release optimize=size lto=full \
             use_ccache=yes \
-            module_bullet_enabled=no \
+            disable_3d=yes \
+            module_bullet_physics_enabled=no \
             module_raycast_enabled=no \
-            module_webxr_enabled=no \
-            module_multiplayer_enabled=no \
-            module_webrtc_enabled=no \
+            module_webp_enabled=no \
             module_theora_enabled=no \
             module_minimp3_enabled=no \
-            module_squish_enabled=no \
+            module_csg_enabled=no \
             module_gridmap_enabled=no \
-            module_openxr_enabled=no \
+            module_multiplayer_enabled=no \
+            module_webrtc_enabled=no \
             module_jsonrpc_enabled=no \
-            module_mobile_vr_enabled=no \
+            module_openxr_enabled=no \
+            module_webxr_enabled=no \
+            module_squish_enabled=no \
             module_tga_enabled=no \
             module_hdr_enabled=no \
-            module_meshoptimizer_enabled=no \
-            module_lightmap_cpu_enabled=no \
-            module_webp_enabled=no \
+            module_mbedtls_enabled=yes \
+            emcc_flags="-s WASM_BIGINT=1 -s IMPORTED_MEMORY=1 -s USE_PTHREADS=0" \
             --jobs=$(nproc)
 
       - name: List bin contents (diagnostic)
@@ -77,4 +78,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: godot-web-wasm
-          path: bin/**/*.wasm         # 上传所有生成的 .wasm 文件，无论名称和子目录
+          path: bin/**/*.wasm
