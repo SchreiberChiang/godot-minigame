@@ -32,7 +32,7 @@ jobs:
 
       - name: Build engine (minimal 2D)
         run: |
-          scons platform=web target=release optimize=size lto=full \
+          scons platform=web target=template_release optimize=size lto=full \
             module_bullet_enabled=no \
             module_raycast_enabled=no \
             module_webxr_enabled=no \
