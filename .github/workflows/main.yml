@@ -1,0 +1,59 @@
+name: Build Godot Web Minimal
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v12
+        with:
+          version: 3.16.2
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential scons pkg-config libx11-dev libxcursor-dev \
+            libxinerama-dev libgl1-mesa-dev libglu-dev libasound2-dev libpulse-dev libfreetype6-dev \
+            libssl-dev libudev-dev libxi-dev libxrandr-dev yasm
+          pip install brotli
+
+      - name: Build engine (minimal 2D)
+        run: |
+          scons platform=web target=release optimize=size lto=full \
+            module_bullet_enabled=no \
+            module_raycast_enabled=no \
+            module_webxr_enabled=no \
+            module_multiplayer_enabled=no \
+            module_webrtc_enabled=no \
+            module_theora_enabled=no \
+            module_minimp3_enabled=no \
+            module_squish_enabled=no \
+            module_gridmap_enabled=no \
+            module_openxr_enabled=no \
+            module_jsonrpc_enabled=no \
+            module_mobile_vr_enabled=no \
+            module_tga_enabled=no \
+            module_hdr_enabled=no \
+            module_meshoptimizer_enabled=no \
+            module_lightmap_cpu_enabled=no \
+            module_webp_enabled=no \
+            --jobs=$(nproc)
+
+      - name: Compress wasm with Brotli
+        run: |
+          cd bin
+          brotli -Z godot.web.release.wasm
+          ls -lh godot.web.release.wasm.br
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-minimal-wasm
+          path: bin/godot.web.release.wasm.br
