@@ -26,12 +26,14 @@ jobs:
           cd emsdk
           ./emsdk install 3.1.54
           ./emsdk activate 3.1.54
-          source ./emsdk_env.sh
-          echo "$(pwd)" >> $GITHUB_PATH
-          echo "$(pwd)/upstream/emscripten" >> $GITHUB_PATH
+          # 将 emsdk 根目录路径写入环境变量，供后续步骤使用
+          echo "EMSDK_ROOT=$(pwd)" >> $GITHUB_ENV
 
       - name: Build engine (minimal 2D)
         run: |
+          # 激活 Emscripten 环境
+          source "${EMSDK_ROOT}/emsdk_env.sh"
+          # 现在 emcc 应该在 PATH 中了，开始编译
           scons platform=web target=template_release optimize=size lto=full \
             module_bullet_enabled=no \
             module_raycast_enabled=no \
