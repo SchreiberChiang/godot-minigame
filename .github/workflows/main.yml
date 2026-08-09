@@ -12,8 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       # ============================================================
-      # 1. Checkout Godot source
+      # 1. Checkout Godot
       # ============================================================
       - name: Checkout Godot source
         uses: actions/checkout@v4
@@ -23,7 +24,7 @@ jobs:
           submodules: recursive
 
       # ============================================================
-      # 2. Install build dependencies
+      # 2. Install dependencies
       # ============================================================
       - name: Install dependencies
         run: |
@@ -50,7 +51,7 @@ jobs:
             ccache
 
       # ============================================================
-      # 3. Restore Emscripten cache
+      # 3. Cache Emscripten
       # ============================================================
       - name: Cache Emscripten
         uses: actions/cache@v4
@@ -89,15 +90,21 @@ jobs:
           max-size: 5G
 
       # ============================================================
-      # 6. Verify ccache before build
+      # 6. Force ccache configuration
       # ============================================================
-      - name: Check ccache before build
+      - name: Configure ccache environment
         run: |
-          echo "========================================"
-          echo "CCACHE VERSION"
-          echo "========================================"
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
 
-          ccache --version
+          ccache --set-config=cache_dir="$GITHUB_WORKSPACE/.ccache"
+          ccache --set-config=max_size=5G
+          ccache --set-config=compiler_check=content
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=1
+
+          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+
+          ccache --zero-stats
 
           echo ""
           echo "========================================"
@@ -108,13 +115,13 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "CCACHE STATS BEFORE BUILD"
+          echo "CCACHE BEFORE BUILD"
           echo "========================================"
 
           ccache --show-stats
 
       # ============================================================
-      # 7. Build Godot Web Minimal 2D
+      # 7. Build Godot
       # ============================================================
       - name: Build engine (minimal 2D)
         env:
@@ -123,21 +130,26 @@ jobs:
         run: |
           source "${EMSDK_ROOT}/emsdk_env.sh"
 
+          # --------------------------------------------------------
+          # Put ccache wrappers before compiler
+          # --------------------------------------------------------
+          export PATH="/usr/lib/ccache:$PATH"
+
           echo "========================================"
-          echo "BUILD ENVIRONMENT"
+          echo "COMPILERS"
           echo "========================================"
 
-          echo "Emscripten:"
-          emcc --version
+          which ccache || true
+          which emcc
+          which em++
 
           echo ""
-          echo "CCACHE:"
-          which ccache
+          echo "ccache:"
           ccache --version
 
           echo ""
           echo "CCACHE_DIR:"
-          echo "${CCACHE_DIR:-<not set>}"
+          echo "$CCACHE_DIR"
 
           echo ""
           echo "========================================"
@@ -167,16 +179,16 @@ jobs:
             module_tga_enabled=no \
             module_hdr_enabled=no \
             module_mbedtls_enabled=yes \
-            emcc_flags="-s WASM_BIGINT=1 -s IMPORTED_MEMORY=1 -s USE_PTHREADS=0" \
+            emcc_flags="-s WASM_BIGINT=1 -s USE_PTHREADS=0" \
             --jobs=$(nproc)
 
       # ============================================================
-      # 8. Show ccache statistics
+      # 8. Show ccache result
       # ============================================================
       - name: Check ccache after build
         run: |
           echo "========================================"
-          echo "CCACHE STATS AFTER BUILD"
+          echo "CCACHE AFTER BUILD"
           echo "========================================"
 
           ccache --show-stats
@@ -190,56 +202,56 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "CCACHE SIZE"
+          echo "CCACHE DIRECTORY"
           echo "========================================"
 
-          ccache --show-stats | grep -E "Cache size|files in cache|Hits|Misses" || true
+          du -sh "$CCACHE_DIR" || true
+
+          echo ""
+          echo "========================================"
+          echo "CCACHE FILE COUNT"
+          echo "========================================"
+
+          find "$CCACHE_DIR" -type f | wc -l || true
 
       # ============================================================
-      # 9. List generated files
+      # 9. List output
       # ============================================================
       - name: List bin contents
         run: |
           echo "========================================"
-          echo "TOP LEVEL BIN"
+          echo "BIN"
           echo "========================================"
 
           ls -lah bin/ || true
 
           echo ""
           echo "========================================"
-          echo "WASM FILES"
+          echo "WASM"
           echo "========================================"
 
-          find bin -type f -name "*.wasm" -exec ls -lh {} \; || true
+          find bin -name "*.wasm" -type f -exec ls -lh {} \; || true
 
           echo ""
           echo "========================================"
-          echo "ALL BIN FILES"
+          echo "ALL FILES"
           echo "========================================"
 
           find bin -type f -printf "%p\t%k KB\n" | sort || true
 
       # ============================================================
-      # 10. Check WASM size
+      # 10. WASM size
       # ============================================================
-      - name: WASM size
+      - name: Show WASM size
         run: |
           echo "========================================"
           echo "WASM SIZE"
           echo "========================================"
 
-          for file in bin/**/*.wasm; do
-            if [ -f "$file" ]; then
-              echo ""
-              echo "File: $file"
-              ls -lh "$file"
-              du -h "$file"
-            fi
-          done
+          find bin -name "*.wasm" -type f -exec du -h {} \;
 
       # ============================================================
-      # 11. Upload WASM artifact
+      # 11. Upload WASM
       # ============================================================
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
