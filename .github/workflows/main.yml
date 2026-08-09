@@ -278,6 +278,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: godot-web-minimal-wasm
-          path: bin/
+          path: bin/**/*.wasm
           if-no-files-found: error
 
