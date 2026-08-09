@@ -51,62 +51,19 @@ jobs:
             ccache
 
       # ============================================================
-      # 3. Cache Emscripten
+      # 3. Restore ccache
       # ============================================================
-      - name: Cache Emscripten
-        uses: actions/cache@v4
-        with:
-          path: |
-            emsdk
-            ~/.emscripten
-            ~/.cache/emscripten
-          key: emscripten-4.0.0-${{ runner.os }}-${{ runner.arch }}
-          restore-keys: |
-            emscripten-4.0.0-${{ runner.os }}-
-
-      # ============================================================
-      # 4. Setup Emscripten
-      # ============================================================
-      - name: Setup Emscripten
-        run: |
-          if [ ! -d "emsdk" ]; then
-            git clone https://github.com/emscripten-core/emsdk.git
-          fi
-
-          cd emsdk
-
-          ./emsdk install 4.0.0
-          ./emsdk activate 4.0.0
-
-          echo "EMSDK_ROOT=$PWD" >> "$GITHUB_ENV"
-
-      # ============================================================
-      # 5. Restore / configure ccache
-      # ============================================================
-      - name: Configure ccache
+      - name: Restore ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
           key: godot-4.7.1-web-minimal
           max-size: 5G
 
       # ============================================================
-      # 6. Configure ccache environment
+      # 4. Configure ccache
       # ============================================================
-      - name: Configure ccache environment
+      - name: Configure ccache
         run: |
-          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
-
-          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
-
-          mkdir -p "$CCACHE_DIR"
-
-          ccache --set-config=cache_dir="$CCACHE_DIR"
-          ccache --set-config=max_size=5G
-          ccache --set-config=compiler_check=content
-          ccache --set-config=compression=true
-          ccache --set-config=compression_level=1
-
-          echo ""
           echo "========================================"
           echo "CCACHE VERSION"
           echo "========================================"
@@ -127,8 +84,84 @@ jobs:
 
           ccache --show-stats
 
+          echo ""
+          echo "========================================"
+          echo "CCACHE DIRECTORY"
+          echo "========================================"
+
+          echo "CCACHE_DIR=$CCACHE_DIR"
+
+          mkdir -p "$CCACHE_DIR"
+
       # ============================================================
-      # 7. Build Godot
+      # 5. Cache Emscripten
+      # ============================================================
+      - name: Cache Emscripten
+        uses: actions/cache@v4
+        with:
+          path: |
+            emsdk
+            ~/.emscripten
+            ~/.cache/emscripten
+          key: emscripten-4.0.0-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            emscripten-4.0.0-${{ runner.os }}-
+
+      # ============================================================
+      # 6. Setup Emscripten
+      # ============================================================
+      - name: Setup Emscripten
+        run: |
+          if [ ! -d "emsdk" ]; then
+            git clone https://github.com/emscripten-core/emsdk.git
+          fi
+
+          cd emsdk
+
+          ./emsdk install 4.0.0
+          ./emsdk activate 4.0.0
+
+          echo "EMSDK_ROOT=$PWD" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # 7. Verify toolchain
+      # ============================================================
+      - name: Verify toolchain
+        run: |
+          source "${EMSDK_ROOT}/emsdk_env.sh"
+
+          echo "========================================"
+          echo "EMCC"
+          echo "========================================"
+
+          which emcc
+          emcc --version
+
+          echo ""
+          echo "========================================"
+          echo "EM++"
+          echo "========================================"
+
+          which em++
+          em++ --version
+
+          echo ""
+          echo "========================================"
+          echo "CCACHE"
+          echo "========================================"
+
+          which ccache
+          ccache --version
+
+          echo ""
+          echo "========================================"
+          echo "CCACHE_DIR"
+          echo "========================================"
+
+          echo "$CCACHE_DIR"
+
+      # ============================================================
+      # 8. Build Godot
       # ============================================================
       - name: Build engine (minimal 2D)
         env:
@@ -137,32 +170,8 @@ jobs:
         run: |
           source "${EMSDK_ROOT}/emsdk_env.sh"
 
-          echo ""
           echo "========================================"
-          echo "TOOLCHAIN"
-          echo "========================================"
-
-          echo "emcc:"
-          which emcc
-          emcc --version
-
-          echo ""
-          echo "em++:"
-          which em++
-          em++ --version
-
-          echo ""
-          echo "ccache:"
-          which ccache
-          ccache --version
-
-          echo ""
-          echo "CCACHE_DIR:"
-          echo "$CCACHE_DIR"
-
-          echo ""
-          echo "========================================"
-          echo "BUILD GODOT"
+          echo "BUILD GODOT 4.7.1 WEB"
           echo "========================================"
 
           scons \
@@ -194,9 +203,9 @@ jobs:
             --jobs=$(nproc)
 
       # ============================================================
-      # 8. Check ccache
+      # 9. ccache result
       # ============================================================
-      - name: Check ccache after build
+      - name: Show ccache result
         run: |
           echo ""
           echo "========================================"
@@ -227,13 +236,12 @@ jobs:
           find "$CCACHE_DIR" -type f | wc -l || true
 
       # ============================================================
-      # 9. List output
+      # 10. WASM output
       # ============================================================
-      - name: List bin contents
+      - name: Inspect WASM
         run: |
-          echo ""
           echo "========================================"
-          echo "BIN CONTENTS"
+          echo "BIN"
           echo "========================================"
 
           ls -lah bin/ || true
@@ -243,13 +251,8 @@ jobs:
           echo "WASM FILES"
           echo "========================================"
 
-          find bin -type f -name "*.wasm" -exec ls -lh {} \; || true
+          find bin -type f -name "*.wasm" -exec ls -lh {} \;
 
-      # ============================================================
-      # 10. Show WASM size
-      # ============================================================
-      - name: Show WASM size
-        run: |
           echo ""
           echo "========================================"
           echo "WASM SIZE"
@@ -266,4 +269,4 @@ jobs:
           name: godot-web-minimal-wasm
           path: bin/**/*.wasm
           if-no-files-found: error
-```
+
