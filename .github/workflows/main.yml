@@ -1,3 +1,4 @@
+```yaml
 name: Build Godot Web Minimal (WeChat Compatible)
 
 on:
@@ -81,7 +82,7 @@ jobs:
           echo "EMSDK_ROOT=$PWD" >> "$GITHUB_ENV"
 
       # ============================================================
-      # 5. Configure ccache
+      # 5. Restore / configure ccache
       # ============================================================
       - name: Configure ccache
         uses: hendrikmuhs/ccache-action@v1
@@ -90,21 +91,28 @@ jobs:
           max-size: 5G
 
       # ============================================================
-      # 6. Force ccache configuration
+      # 6. Configure ccache environment
       # ============================================================
       - name: Configure ccache environment
         run: |
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+
           echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
 
-          ccache --set-config=cache_dir="$GITHUB_WORKSPACE/.ccache"
+          mkdir -p "$CCACHE_DIR"
+
+          ccache --set-config=cache_dir="$CCACHE_DIR"
           ccache --set-config=max_size=5G
           ccache --set-config=compiler_check=content
           ccache --set-config=compression=true
           ccache --set-config=compression_level=1
 
-          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+          echo ""
+          echo "========================================"
+          echo "CCACHE VERSION"
+          echo "========================================"
 
-          ccache --zero-stats
+          ccache --version
 
           echo ""
           echo "========================================"
@@ -130,21 +138,23 @@ jobs:
         run: |
           source "${EMSDK_ROOT}/emsdk_env.sh"
 
-          # --------------------------------------------------------
-          # Put ccache wrappers before compiler
-          # --------------------------------------------------------
-          export PATH="/usr/lib/ccache:$PATH"
-
+          echo ""
           echo "========================================"
-          echo "COMPILERS"
+          echo "TOOLCHAIN"
           echo "========================================"
 
-          which ccache || true
+          echo "emcc:"
           which emcc
+          emcc --version
+
+          echo ""
+          echo "em++:"
           which em++
+          em++ --version
 
           echo ""
           echo "ccache:"
+          which ccache
           ccache --version
 
           echo ""
@@ -159,9 +169,12 @@ jobs:
           scons \
             platform=web \
             target=template_release \
+            arch=wasm32 \
             optimize=size \
             lto=full \
-            use_ccache=yes \
+            threads=no \
+            c_compiler_launcher=ccache \
+            cpp_compiler_launcher=ccache \
             disable_3d=yes \
             module_bullet_physics_enabled=no \
             module_raycast_enabled=no \
@@ -179,14 +192,14 @@ jobs:
             module_tga_enabled=no \
             module_hdr_enabled=no \
             module_mbedtls_enabled=yes \
-            emcc_flags="-s WASM_BIGINT=1 -s USE_PTHREADS=0" \
             --jobs=$(nproc)
 
       # ============================================================
-      # 8. Show ccache result
+      # 8. Check ccache
       # ============================================================
       - name: Check ccache after build
         run: |
+          echo ""
           echo "========================================"
           echo "CCACHE AFTER BUILD"
           echo "========================================"
@@ -202,7 +215,7 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "CCACHE DIRECTORY"
+          echo "CCACHE DIRECTORY SIZE"
           echo "========================================"
 
           du -sh "$CCACHE_DIR" || true
@@ -219,36 +232,31 @@ jobs:
       # ============================================================
       - name: List bin contents
         run: |
+          echo ""
           echo "========================================"
-          echo "BIN"
+          echo "BIN CONTENTS"
           echo "========================================"
 
           ls -lah bin/ || true
 
           echo ""
           echo "========================================"
-          echo "WASM"
+          echo "WASM FILES"
           echo "========================================"
 
-          find bin -name "*.wasm" -type f -exec ls -lh {} \; || true
-
-          echo ""
-          echo "========================================"
-          echo "ALL FILES"
-          echo "========================================"
-
-          find bin -type f -printf "%p\t%k KB\n" | sort || true
+          find bin -type f -name "*.wasm" -exec ls -lh {} \; || true
 
       # ============================================================
-      # 10. WASM size
+      # 10. Show WASM size
       # ============================================================
       - name: Show WASM size
         run: |
+          echo ""
           echo "========================================"
           echo "WASM SIZE"
           echo "========================================"
 
-          find bin -name "*.wasm" -type f -exec du -h {} \;
+          find bin -type f -name "*.wasm" -exec du -h {} \;
 
       # ============================================================
       # 11. Upload WASM
@@ -259,3 +267,4 @@ jobs:
           name: godot-web-minimal-wasm
           path: bin/**/*.wasm
           if-no-files-found: error
+```
