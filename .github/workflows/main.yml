@@ -10,42 +10,145 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
+      # ============================================================
+      # 1. Checkout Godot source
+      # ============================================================
       - name: Checkout Godot source
         uses: actions/checkout@v4
         with:
           repository: godotengine/godot
-          ref: 4.7.1-stable          # ⚠️ 如果此标签不存在，可更换为实际存在的稳定标签，如 4.6.1-stable
+          ref: 4.7.1-stable
           submodules: recursive
 
+      # ============================================================
+      # 2. Install build dependencies
+      # ============================================================
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential scons pkg-config libx11-dev libxcursor-dev \
-            libxinerama-dev libgl1-mesa-dev libglu-dev libasound2-dev libpulse-dev libfreetype6-dev \
-            libssl-dev libudev-dev libxi-dev libxrandr-dev yasm python3-pip ccache
 
-      - name: Setup Emscripten manually
+          sudo apt-get install -y \
+            build-essential \
+            scons \
+            pkg-config \
+            libx11-dev \
+            libxcursor-dev \
+            libxinerama-dev \
+            libgl1-mesa-dev \
+            libglu-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libfreetype6-dev \
+            libssl-dev \
+            libudev-dev \
+            libxi-dev \
+            libxrandr-dev \
+            yasm \
+            python3-pip \
+            ccache
+
+      # ============================================================
+      # 3. Restore Emscripten cache
+      # ============================================================
+      - name: Cache Emscripten
+        uses: actions/cache@v4
+        with:
+          path: |
+            emsdk
+            ~/.emscripten
+            ~/.cache/emscripten
+          key: emscripten-4.0.0-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            emscripten-4.0.0-${{ runner.os }}-
+
+      # ============================================================
+      # 4. Setup Emscripten
+      # ============================================================
+      - name: Setup Emscripten
         run: |
-          git clone https://github.com/emscripten-core/emsdk.git
+          if [ ! -d "emsdk" ]; then
+            git clone https://github.com/emscripten-core/emsdk.git
+          fi
+
           cd emsdk
+
           ./emsdk install 4.0.0
           ./emsdk activate 4.0.0
-          echo "EMSDK_ROOT=$(pwd)" >> $GITHUB_ENV
 
+          echo "EMSDK_ROOT=$PWD" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # 5. Configure ccache
+      # ============================================================
       - name: Configure ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
-          key: godot-web-minimal
-          max-size: 2G
+          key: godot-4.7.1-web-minimal
+          max-size: 5G
 
+      # ============================================================
+      # 6. Verify ccache before build
+      # ============================================================
+      - name: Check ccache before build
+        run: |
+          echo "========================================"
+          echo "CCACHE VERSION"
+          echo "========================================"
+
+          ccache --version
+
+          echo ""
+          echo "========================================"
+          echo "CCACHE CONFIG"
+          echo "========================================"
+
+          ccache --show-config
+
+          echo ""
+          echo "========================================"
+          echo "CCACHE STATS BEFORE BUILD"
+          echo "========================================"
+
+          ccache --show-stats
+
+      # ============================================================
+      # 7. Build Godot Web Minimal 2D
+      # ============================================================
       - name: Build engine (minimal 2D)
         env:
           CCACHE_COMPRESS: true
           CCACHE_COMPRESSLEVEL: 1
         run: |
           source "${EMSDK_ROOT}/emsdk_env.sh"
-          scons platform=web target=template_release optimize=size lto=full \
+
+          echo "========================================"
+          echo "BUILD ENVIRONMENT"
+          echo "========================================"
+
+          echo "Emscripten:"
+          emcc --version
+
+          echo ""
+          echo "CCACHE:"
+          which ccache
+          ccache --version
+
+          echo ""
+          echo "CCACHE_DIR:"
+          echo "${CCACHE_DIR:-<not set>}"
+
+          echo ""
+          echo "========================================"
+          echo "BUILD GODOT"
+          echo "========================================"
+
+          scons \
+            platform=web \
+            target=template_release \
+            optimize=size \
+            lto=full \
             use_ccache=yes \
             disable_3d=yes \
             module_bullet_physics_enabled=no \
@@ -67,15 +170,80 @@ jobs:
             emcc_flags="-s WASM_BIGINT=1 -s IMPORTED_MEMORY=1 -s USE_PTHREADS=0" \
             --jobs=$(nproc)
 
-      - name: List bin contents (diagnostic)
+      # ============================================================
+      # 8. Show ccache statistics
+      # ============================================================
+      - name: Check ccache after build
         run: |
-          echo "=== Top-level bin/ ==="
-          ls -la bin/ || true
-          echo "=== Searching for .wasm files ==="
-          find bin -name "*.wasm" -type f || echo "No .wasm files found."
+          echo "========================================"
+          echo "CCACHE STATS AFTER BUILD"
+          echo "========================================"
 
-      - name: Upload wasm artifacts
+          ccache --show-stats
+
+          echo ""
+          echo "========================================"
+          echo "CCACHE CONFIG"
+          echo "========================================"
+
+          ccache --show-config
+
+          echo ""
+          echo "========================================"
+          echo "CCACHE SIZE"
+          echo "========================================"
+
+          ccache --show-stats | grep -E "Cache size|files in cache|Hits|Misses" || true
+
+      # ============================================================
+      # 9. List generated files
+      # ============================================================
+      - name: List bin contents
+        run: |
+          echo "========================================"
+          echo "TOP LEVEL BIN"
+          echo "========================================"
+
+          ls -lah bin/ || true
+
+          echo ""
+          echo "========================================"
+          echo "WASM FILES"
+          echo "========================================"
+
+          find bin -type f -name "*.wasm" -exec ls -lh {} \; || true
+
+          echo ""
+          echo "========================================"
+          echo "ALL BIN FILES"
+          echo "========================================"
+
+          find bin -type f -printf "%p\t%k KB\n" | sort || true
+
+      # ============================================================
+      # 10. Check WASM size
+      # ============================================================
+      - name: WASM size
+        run: |
+          echo "========================================"
+          echo "WASM SIZE"
+          echo "========================================"
+
+          for file in bin/**/*.wasm; do
+            if [ -f "$file" ]; then
+              echo ""
+              echo "File: $file"
+              ls -lh "$file"
+              du -h "$file"
+            fi
+          done
+
+      # ============================================================
+      # 11. Upload WASM artifact
+      # ============================================================
+      - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: godot-web-wasm
+          name: godot-web-minimal-wasm
           path: bin/**/*.wasm
+          if-no-files-found: error
