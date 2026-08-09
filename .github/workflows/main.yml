@@ -51,24 +51,48 @@ jobs:
             ccache
 
       # ============================================================
-      # 3. Restore ccache
+      # 3. Configure ccache path
       # ============================================================
-      - name: Restore ccache
-        uses: hendrikmuhs/ccache-action@v1
-        with:
-          key: godot-4.7.1-web-minimal
-          max-size: 5G
+      - name: Configure ccache path
+        run: |
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
+          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+
+          ccache --set-config=cache_dir="$GITHUB_WORKSPACE/.ccache"
+          ccache --set-config=max_size=5G
+          ccache --set-config=compiler_check=content
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=1
 
       # ============================================================
-      # 4. Configure ccache
+      # 4. Restore ccache
       # ============================================================
-      - name: Configure ccache
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: godot-4.7.1-web-ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('SConstruct', 'platform/web/detect.py', 'platform/web/SCsub') }}
+          restore-keys: |
+            godot-4.7.1-web-ccache-${{ runner.os }}-${{ runner.arch }}-
+
+      # ============================================================
+      # 5. Check ccache
+      # ============================================================
+      - name: Check ccache
         run: |
           echo "========================================"
           echo "CCACHE VERSION"
           echo "========================================"
 
           ccache --version
+
+          echo ""
+          echo "========================================"
+          echo "CCACHE DIR"
+          echo "========================================"
+
+          echo "$CCACHE_DIR"
 
           echo ""
           echo "========================================"
@@ -79,22 +103,20 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "CCACHE BEFORE BUILD"
+          echo "CCACHE STATS BEFORE BUILD"
           echo "========================================"
 
           ccache --show-stats
 
           echo ""
           echo "========================================"
-          echo "CCACHE DIRECTORY"
+          echo "CCACHE FILES BEFORE BUILD"
           echo "========================================"
 
-          echo "CCACHE_DIR=$CCACHE_DIR"
-
-          mkdir -p "$CCACHE_DIR"
+          find "$CCACHE_DIR" -type f | wc -l || true
 
       # ============================================================
-      # 5. Cache Emscripten
+      # 6. Cache Emscripten
       # ============================================================
       - name: Cache Emscripten
         uses: actions/cache@v4
@@ -108,7 +130,7 @@ jobs:
             emscripten-4.0.0-${{ runner.os }}-
 
       # ============================================================
-      # 6. Setup Emscripten
+      # 7. Setup Emscripten
       # ============================================================
       - name: Setup Emscripten
         run: |
@@ -124,7 +146,7 @@ jobs:
           echo "EMSDK_ROOT=$PWD" >> "$GITHUB_ENV"
 
       # ============================================================
-      # 7. Verify toolchain
+      # 8. Verify toolchain
       # ============================================================
       - name: Verify toolchain
         run: |
@@ -154,14 +176,10 @@ jobs:
           ccache --version
 
           echo ""
-          echo "========================================"
-          echo "CCACHE_DIR"
-          echo "========================================"
-
-          echo "$CCACHE_DIR"
+          echo "CCACHE_DIR=$CCACHE_DIR"
 
       # ============================================================
-      # 8. Build Godot
+      # 9. Build Godot
       # ============================================================
       - name: Build engine (minimal 2D)
         env:
@@ -203,7 +221,7 @@ jobs:
             --jobs=$(nproc)
 
       # ============================================================
-      # 9. ccache result
+      # 10. Show ccache result
       # ============================================================
       - name: Show ccache result
         run: |
@@ -216,14 +234,7 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "CCACHE CONFIG"
-          echo "========================================"
-
-          ccache --show-config
-
-          echo ""
-          echo "========================================"
-          echo "CCACHE DIRECTORY SIZE"
+          echo "CCACHE DIRECTORY"
           echo "========================================"
 
           du -sh "$CCACHE_DIR" || true
@@ -236,7 +247,7 @@ jobs:
           find "$CCACHE_DIR" -type f | wc -l || true
 
       # ============================================================
-      # 10. WASM output
+      # 11. Inspect WASM
       # ============================================================
       - name: Inspect WASM
         run: |
@@ -261,7 +272,7 @@ jobs:
           find bin -type f -name "*.wasm" -exec du -h {} \;
 
       # ============================================================
-      # 11. Upload WASM
+      # 12. Upload WASM
       # ============================================================
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
