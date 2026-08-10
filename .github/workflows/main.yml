@@ -12,24 +12,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ============================================================
+      # 1. 克隆 godot-minigame (包含 skills/ 补丁脚本)
+      # ============================================================
+      - name: Checkout godot-minigame
+        uses: actions/checkout@v4
+        with:
+          repository: godothub/godot-minigame
+          path: godot-minigame
 
       # ============================================================
-      # 1. Checkout Godot
+      # 2. 克隆 Godot 官方源码并切换到指定提交
       # ============================================================
       - name: Checkout Godot source
         uses: actions/checkout@v4
         with:
           repository: godotengine/godot
-          ref: 4.7.1-stable
+          ref: a16e481cf424f8e39dc2cdea1a6bdc1e309acdc1
+          path: godot
           submodules: recursive
 
       # ============================================================
-      # 2. Install dependencies
+      # 3. 安装依赖
       # ============================================================
       - name: Install dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
             build-essential \
             scons \
@@ -48,75 +56,32 @@ jobs:
             libxrandr-dev \
             yasm \
             python3-pip \
-            ccache
+            ccache \
+            ripgrep
 
       # ============================================================
-      # 3. Configure ccache path
+      # 4. 配置 ccache
       # ============================================================
-      - name: Configure ccache path
+      - name: Configure ccache
         run: |
           echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
-
           mkdir -p "$GITHUB_WORKSPACE/.ccache"
-
           ccache --set-config=cache_dir="$GITHUB_WORKSPACE/.ccache"
           ccache --set-config=max_size=5G
           ccache --set-config=compiler_check=content
           ccache --set-config=compression=true
           ccache --set-config=compression_level=1
 
-      # ============================================================
-      # 4. Restore ccache
-      # ============================================================
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: godot-4.7.1-web-ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('SConstruct', 'platform/web/detect.py', 'platform/web/SCsub') }}
+          key: godot-4.6.2-web-ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('godot/SConstruct', 'godot/platform/web/detect.py', 'godot/platform/web/SCsub') }}
           restore-keys: |
-            godot-4.7.1-web-ccache-${{ runner.os }}-${{ runner.arch }}-
+            godot-4.6.2-web-ccache-${{ runner.os }}-${{ runner.arch }}-
 
       # ============================================================
-      # 5. Check ccache
-      # ============================================================
-      - name: Check ccache
-        run: |
-          echo "========================================"
-          echo "CCACHE VERSION"
-          echo "========================================"
-
-          ccache --version
-
-          echo ""
-          echo "========================================"
-          echo "CCACHE DIR"
-          echo "========================================"
-
-          echo "$CCACHE_DIR"
-
-          echo ""
-          echo "========================================"
-          echo "CCACHE CONFIG"
-          echo "========================================"
-
-          ccache --show-config
-
-          echo ""
-          echo "========================================"
-          echo "CCACHE STATS BEFORE BUILD"
-          echo "========================================"
-
-          ccache --show-stats
-
-          echo ""
-          echo "========================================"
-          echo "CCACHE FILES BEFORE BUILD"
-          echo "========================================"
-
-          find "$CCACHE_DIR" -type f | wc -l || true
-
-      # ============================================================
-      # 6. Cache Emscripten
+      # 5. 缓存并安装 Emscripten 4.0.10
       # ============================================================
       - name: Cache Emscripten
         uses: actions/cache@v4
@@ -125,61 +90,35 @@ jobs:
             emsdk
             ~/.emscripten
             ~/.cache/emscripten
-          key: emscripten-4.0.0-${{ runner.os }}-${{ runner.arch }}
+          key: emscripten-4.0.10-${{ runner.os }}-${{ runner.arch }}
           restore-keys: |
-            emscripten-4.0.0-${{ runner.os }}-
+            emscripten-4.0.10-${{ runner.os }}-
 
-      # ============================================================
-      # 7. Setup Emscripten
-      # ============================================================
       - name: Setup Emscripten
         run: |
           if [ ! -d "emsdk" ]; then
             git clone https://github.com/emscripten-core/emsdk.git
           fi
-
           cd emsdk
-
-          ./emsdk install 4.0.0
-          ./emsdk activate 4.0.0
-
+          ./emsdk install 4.0.10
+          ./emsdk activate 4.0.10
           echo "EMSDK_ROOT=$PWD" >> "$GITHUB_ENV"
 
       # ============================================================
-      # 8. Verify toolchain
+      # 6. 应用 godot-minigame 适配补丁
       # ============================================================
-      - name: Verify toolchain
+      - name: Apply godot-minigame patchset
         run: |
-          source "${EMSDK_ROOT}/emsdk_env.sh"
+          cd godot
+          python ../godot-minigame/skills/scripts/apply_godot_patchset.py .
 
-          echo "========================================"
-          echo "EMCC"
-          echo "========================================"
-
-          which emcc
-          emcc --version
-
-          echo ""
-          echo "========================================"
-          echo "EM++"
-          echo "========================================"
-
-          which em++
-          em++ --version
-
-          echo ""
-          echo "========================================"
-          echo "CCACHE"
-          echo "========================================"
-
-          which ccache
-          ccache --version
-
-          echo ""
-          echo "CCACHE_DIR=$CCACHE_DIR"
+      - name: Verify patch applied
+        run: |
+          cd godot
+          rg -n "WXMEMFS|write_offset|getWindowInfo|showKeyboard|wx.exitMiniProgram|wasm_simd|wasm\.br" platform/web modules || true
 
       # ============================================================
-      # 9. Build Godot
+      # 7. 编译 2D 裁剪模板
       # ============================================================
       - name: Build engine (minimal 2D)
         env:
@@ -187,11 +126,10 @@ jobs:
           CCACHE_COMPRESSLEVEL: 1
         run: |
           source "${EMSDK_ROOT}/emsdk_env.sh"
-
+          cd godot
           echo "========================================"
-          echo "BUILD GODOT 4.7.1 WEB"
+          echo "BUILD GODOT 4.6.2 WEB (WeChat Compatible)"
           echo "========================================"
-
           scons \
             platform=web \
             target=template_release \
@@ -199,85 +137,55 @@ jobs:
             optimize=size \
             lto=full \
             threads=no \
+            wasm_simd=no \
+            disable_3d=yes \
             c_compiler_launcher=ccache \
             cpp_compiler_launcher=ccache \
-            disable_3d=yes \
-            module_bullet_physics_enabled=no \
-            module_raycast_enabled=no \
-            module_webp_enabled=no \
-            module_theora_enabled=no \
-            module_minimp3_enabled=no \
-            module_csg_enabled=no \
-            module_gridmap_enabled=no \
-            module_multiplayer_enabled=no \
-            module_webrtc_enabled=no \
-            module_jsonrpc_enabled=no \
-            module_openxr_enabled=no \
-            module_webxr_enabled=no \
-            module_squish_enabled=no \
-            module_tga_enabled=no \
-            module_hdr_enabled=no \
-            module_mbedtls_enabled=yes \
             --jobs=$(nproc)
 
       # ============================================================
-      # 10. Show ccache result
+      # 8. 压缩 WASM (生成 .br 文件)
       # ============================================================
-      - name: Show ccache result
+      - name: Compress WASM
         run: |
-          echo ""
-          echo "========================================"
-          echo "CCACHE AFTER BUILD"
-          echo "========================================"
-
-          ccache --show-stats
-
-          echo ""
-          echo "========================================"
-          echo "CCACHE DIRECTORY"
-          echo "========================================"
-
-          du -sh "$CCACHE_DIR" || true
-
-          echo ""
-          echo "========================================"
-          echo "CCACHE FILE COUNT"
-          echo "========================================"
-
-          find "$CCACHE_DIR" -type f | wc -l || true
+          cd godot
+          # 安装 brotli
+          sudo apt-get install -y brotli
+          # 查找并压缩 wasm 文件
+          find bin -name "*.wasm" -type f | while read -r wasm; do
+            brotli --best "$wasm"
+          done
 
       # ============================================================
-      # 11. Inspect WASM
+      # 9. 显示编译结果
       # ============================================================
-      - name: Inspect WASM
+      - name: Show build results
         run: |
+          cd godot
           echo "========================================"
-          echo "BIN"
+          echo "BIN CONTENTS"
           echo "========================================"
-
           ls -lah bin/ || true
-
           echo ""
           echo "========================================"
           echo "WASM FILES"
           echo "========================================"
+          find bin -type f \( -name "*.wasm" -o -name "*.wasm.br" -o -name "*.js" \) -exec ls -lh {} \;
 
-          find bin -type f -name "*.wasm" -exec ls -lh {} \;
-
-          echo ""
-          echo "========================================"
-          echo "WASM SIZE"
-          echo "========================================"
-
-          find bin -type f -name "*.wasm" -exec du -h {} \;
+      - name: Show ccache stats
+        run: |
+          ccache --show-stats
+          du -sh "$CCACHE_DIR" || true
 
       # ============================================================
-      # 12. Upload WASM
+      # 10. 上传产物 (WASM + JS)
       # ============================================================
-      - name: Upload WASM artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: godot-web-minimal-wasm
-          path: bin/**/*.wasm
+          name: godot-minigame-web
+          path: |
+            godot/bin/**/*.wasm
+            godot/bin/**/*.wasm.br
+            godot/bin/**/*.js
           if-no-files-found: error
-
