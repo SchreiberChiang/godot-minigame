@@ -18,7 +18,6 @@ jobs:
       - name: Checkout godot-minigame
         uses: actions/checkout@v4
         with:
-          repository: godothub/godot-minigame
           path: godot-minigame
 
       # ============================================================
@@ -57,6 +56,7 @@ jobs:
             yasm \
             python3-pip \
             ccache \
+            brotli \
             ripgrep
 
       # ============================================================
@@ -144,17 +144,35 @@ jobs:
             --jobs=$(nproc)
 
       # ============================================================
-      # 8. 压缩 WASM (生成 .br 文件)
+      # 8. 执行微信后处理并组装 Release 同构的 engine 产物
       # ============================================================
-      - name: Compress WASM
+      - name: Package WeChat engine artifact
         run: |
           cd godot
-          # 安装 brotli
-          sudo apt-get install -y brotli
-          # 查找并压缩 wasm 文件
-          find bin -name "*.wasm" -type f | while read -r wasm; do
-            brotli --best "$wasm"
-          done
+
+          # 该脚本同时生成 godot.wasm.br 并对 godot.js 执行微信兼容补丁。
+          sh ./compress_wasm.sh
+
+          mkdir -p action-artifact/engine
+          cp bin/.web_zip/godot.js action-artifact/engine/godot.js
+          cp bin/.web_zip/godot.wasm.br action-artifact/engine/godot.wasm.br
+          cp ../godot-minigame/skills/assets/min-runtime/godot-sdk.js action-artifact/engine/godot-sdk.js
+          cp ../godot-minigame/demo/wxgame/engine/game.js action-artifact/engine/game.js
+
+          # Action 产物是可直接覆盖模板 engine/ 的四个文件，不允许混入原始构建中间件。
+          test -f action-artifact/engine/godot.js
+          test -f action-artifact/engine/godot.wasm.br
+          test -f action-artifact/engine/godot-sdk.js
+          test -f action-artifact/engine/game.js
+          test "$(find action-artifact/engine -maxdepth 1 -type f | wc -l)" -eq 4
+
+          rg -q "FS.mount\\(WXMEMFS" action-artifact/engine/godot.js
+          rg -q "nowPolyfill" action-artifact/engine/godot.js
+          rg -q "root.fsUtils = fsUtils" action-artifact/engine/godot-sdk.js
+          if rg -q "FS.mount\\(IDBFS" action-artifact/engine/godot.js; then
+            echo "godot.js was not post-processed"
+            exit 1
+          fi
 
       # ============================================================
       # 9. 显示编译结果
@@ -163,14 +181,9 @@ jobs:
         run: |
           cd godot
           echo "========================================"
-          echo "BIN CONTENTS"
+          echo "ENGINE ARTIFACT"
           echo "========================================"
-          ls -lah bin/ || true
-          echo ""
-          echo "========================================"
-          echo "WASM FILES"
-          echo "========================================"
-          find bin -type f \( -name "*.wasm" -o -name "*.wasm.br" -o -name "*.js" \) -exec ls -lh {} \;
+          find action-artifact -type f -exec ls -lh {} \;
 
       - name: Show ccache stats
         run: |
@@ -184,8 +197,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: godot-minigame-web
-          path: |
-            godot/bin/**/*.wasm
-            godot/bin/**/*.wasm.br
-            godot/bin/**/*.js
+          path: godot/action-artifact/
           if-no-files-found: error
