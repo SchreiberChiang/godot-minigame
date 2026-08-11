@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: godotengine/godot
-          ref: a16e481cf424f8e39dc2cdea1a6bdc1e309acdc1
+          ref: 4.7.1-stable
           path: godot
           submodules: recursive
 
@@ -139,19 +139,6 @@ jobs:
             threads=no \
             wasm_simd=no \
             disable_3d=yes \
-            disable_physics_2d=yes \
-            disable_navigation_2d=yes \
-            module_regex_enabled=no \
-            module_upnp_enabled=no \
-            module_websocket_enabled=no \
-            module_webrtc_enabled=no \
-            module_webxr_enabled=no \
-            module_jsonrpc_enabled=no \
-            module_squish_enabled=no \
-            module_tga_enabled=no \
-            module_hdr_enabled=no \
-            module_webp_enabled=no \
-            module_theora_enabled=no
             c_compiler_launcher=ccache \
             cpp_compiler_launcher=ccache \
             --jobs=$(nproc)
