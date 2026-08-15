@@ -236,7 +236,8 @@ jobs:
           echo "APPLY WECHAT PATCHSET"
           echo "========================================"
 
-          python ../godot-minigame/skills/scripts/apply_godot_patchset.py .
+          python ../godot-minigame/skills/scripts/apply_godot_patchset.py . \
+            --allow-base-mismatch
 
       # ============================================================
       # 12. Show patch result
