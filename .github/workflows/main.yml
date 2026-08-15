@@ -1,42 +1,86 @@
-name: Build Godot Web Minimal (WeChat Compatible)
+name: Build Godot 4.7.1 Web Minimal (WeChat Compatible)
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: build-minimal-web
+  group: build-godot-4.7.1-wechat-web
   cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.1"
+  GODOT_REF: "4.7.1-stable"
+
+  # 先沿用你当前已经使用的 Emscripten。
+  # 如果 godot-minigame 的 4.7.1 patch 明确要求其他版本，
+  # 只需要修改这里。
+  EMSCRIPTEN_VERSION: "4.0.10"
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+
       # ============================================================
-      # 1. 克隆 godot-minigame (包含 skills/ 补丁脚本)
+      # 1. Checkout godot-minigame
       # ============================================================
       - name: Checkout godot-minigame
         uses: actions/checkout@v4
         with:
           path: godot-minigame
+          fetch-depth: 1
 
       # ============================================================
-      # 2. 克隆 Godot 官方源码并切换到指定提交
+      # 2. Checkout Godot 4.7.1
       # ============================================================
-      - name: Checkout Godot source
+      - name: Checkout Godot 4.7.1 source
         uses: actions/checkout@v4
         with:
           repository: godotengine/godot
-          ref: a16e481cf424f8e39dc2cdea1a6bdc1e309acdc1
+          ref: 4.7.1-stable
           path: godot
           submodules: recursive
+          fetch-depth: 1
 
       # ============================================================
-      # 3. 安装依赖
+      # 3. Verify Godot version
+      # ============================================================
+      - name: Verify Godot version
+        run: |
+          set -e
+
+          cd godot
+
+          echo "========================================"
+          echo "GODOT SOURCE VERSION"
+          echo "========================================"
+
+          echo "Git commit:"
+          git rev-parse HEAD
+
+          echo "Git tag:"
+          git describe --tags --exact-match HEAD || true
+
+          echo "Expected:"
+          echo "${GODOT_VERSION}"
+
+          if ! git describe --tags --exact-match HEAD | grep -qx "${GODOT_REF}"; then
+            echo "ERROR: Godot source is not ${GODOT_REF}"
+            exit 1
+          fi
+
+          echo "Godot 4.7.1 source verified."
+
+      # ============================================================
+      # 4. Install dependencies
       # ============================================================
       - name: Install dependencies
         run: |
+          set -e
+
           sudo apt-get update
+
           sudo apt-get install -y \
             build-essential \
             scons \
@@ -60,28 +104,48 @@ jobs:
             ripgrep
 
       # ============================================================
-      # 4. 配置 ccache
+      # 5. Configure ccache
       # ============================================================
       - name: Configure ccache
         run: |
+          set -e
+
           echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
           mkdir -p "$GITHUB_WORKSPACE/.ccache"
+
           ccache --set-config=cache_dir="$GITHUB_WORKSPACE/.ccache"
           ccache --set-config=max_size=5G
           ccache --set-config=compiler_check=content
           ccache --set-config=compression=true
           ccache --set-config=compression_level=1
 
+      # ============================================================
+      # 6. Restore ccache
+      #
+      # 注意：
+      # 这里把 godot-minigame/skills 也加入 hash。
+      # patch 变化时不会错误复用旧编译缓存。
+      # ============================================================
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: godot-4.6.2-web-ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('godot/SConstruct', 'godot/platform/web/detect.py', 'godot/platform/web/SCsub') }}
+          key: >-
+            godot-${{ env.GODOT_VERSION }}-wechat-web-ccache-
+            ${{ runner.os }}-${{ runner.arch }}-
+            ${{ hashFiles(
+              'godot/SConstruct',
+              'godot/platform/web/detect.py',
+              'godot/platform/web/SCsub',
+              'godot-minigame/skills/**/*'
+            ) }}
+
           restore-keys: |
-            godot-4.6.2-web-ccache-${{ runner.os }}-${{ runner.arch }}-
+            godot-${{ env.GODOT_VERSION }}-wechat-web-ccache-${{ runner.os }}-${{ runner.arch }}-
 
       # ============================================================
-      # 5. 缓存并安装 Emscripten 4.0.10
+      # 7. Cache Emscripten
       # ============================================================
       - name: Cache Emscripten
         uses: actions/cache@v4
@@ -90,46 +154,208 @@ jobs:
             emsdk
             ~/.emscripten
             ~/.cache/emscripten
-          key: emscripten-4.0.10-${{ runner.os }}-${{ runner.arch }}
-          restore-keys: |
-            emscripten-4.0.10-${{ runner.os }}-
 
+          key: >-
+            emscripten-${{ env.EMSCRIPTEN_VERSION }}-
+            ${{ runner.os }}-${{ runner.arch }}
+
+          restore-keys: |
+            emscripten-${{ env.EMSCRIPTEN_VERSION }}-${{ runner.os }}-
+
+      # ============================================================
+      # 8. Install Emscripten
+      # ============================================================
       - name: Setup Emscripten
         run: |
+          set -e
+
           if [ ! -d "emsdk" ]; then
             git clone https://github.com/emscripten-core/emsdk.git
           fi
+
           cd emsdk
-          ./emsdk install 4.0.10
-          ./emsdk activate 4.0.10
+
+          ./emsdk install "${EMSCRIPTEN_VERSION}"
+          ./emsdk activate "${EMSCRIPTEN_VERSION}"
+
           echo "EMSDK_ROOT=$PWD" >> "$GITHUB_ENV"
 
       # ============================================================
-      # 6. 应用 godot-minigame 适配补丁
+      # 9. Verify Emscripten
+      # ============================================================
+      - name: Verify Emscripten
+        run: |
+          set -e
+
+          source "${EMSDK_ROOT}/emsdk_env.sh"
+
+          echo "========================================"
+          echo "EMSCRIPTEN"
+          echo "========================================"
+
+          emcc --version
+
+          echo "EMSDK:"
+          echo "$EMSDK"
+
+          echo "EM_CONFIG:"
+          echo "$EM_CONFIG"
+
+      # ============================================================
+      # 10. Inspect godot-minigame patch tools
+      # ============================================================
+      - name: Inspect patch tools
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "GODOT MINIGAME PATCH TOOLS"
+          echo "========================================"
+
+          test -f \
+            godot-minigame/skills/scripts/apply_godot_patchset.py
+
+          echo "apply_godot_patchset.py:"
+          ls -lh \
+            godot-minigame/skills/scripts/apply_godot_patchset.py
+
+          echo
+          echo "Available skills:"
+          find godot-minigame/skills -maxdepth 3 -type f | sort | head -200
+
+      # ============================================================
+      # 11. Apply godot-minigame patchset
       # ============================================================
       - name: Apply godot-minigame patchset
         run: |
+          set -e
+
           cd godot
+
+          echo "========================================"
+          echo "APPLY WECHAT PATCHSET"
+          echo "========================================"
+
           python ../godot-minigame/skills/scripts/apply_godot_patchset.py .
 
-      - name: Verify patch applied
+      # ============================================================
+      # 12. Show patch result
+      # ============================================================
+      - name: Show patch result
         run: |
+          set -e
+
           cd godot
-          rg -n "WXMEMFS|write_offset|getWindowInfo|showKeyboard|wx.exitMiniProgram|wasm_simd|wasm\.br" platform/web modules || true
+
+          echo "========================================"
+          echo "PATCH RESULT"
+          echo "========================================"
+
+          git status --short
+
+          echo
+          echo "Changed files:"
+          git status --short | wc -l
+
+          echo
+          echo "Diff stat:"
+          git diff --stat
 
       # ============================================================
-      # 7. 编译 2D 裁剪模板
+      # 13. Verify WeChat patch
+      #
+      # 这里不使用 || true。
+      # 任何关键适配缺失都直接失败。
       # ============================================================
-      - name: Build engine (minimal 2D)
+      - name: Verify WeChat patch
+        run: |
+          set -e
+
+          cd godot
+
+          echo "========================================"
+          echo "VERIFY WECHAT PATCH"
+          echo "========================================"
+
+          echo
+          echo "[1] WXMEMFS"
+          rg -n "WXMEMFS" platform/web modules
+
+          echo
+          echo "[2] write_offset"
+          rg -n "write_offset" platform/web modules
+
+          echo
+          echo "[3] getWindowInfo"
+          rg -n "getWindowInfo" platform/web modules
+
+          echo
+          echo "[4] showKeyboard"
+          rg -n "showKeyboard" platform/web modules
+
+          echo
+          echo "[5] wx.exitMiniProgram"
+          rg -n "wx\.exitMiniProgram" platform/web modules
+
+          echo
+          echo "[6] wasm SIMD"
+          rg -n "wasm_simd" platform/web modules
+
+          echo
+          echo "[7] wasm.br"
+          rg -n "wasm\.br" platform/web modules
+
+      # ============================================================
+      # 14. Verify compress_wasm.sh
+      # ============================================================
+      - name: Verify WASM compression script
+        run: |
+          set -e
+
+          cd godot
+
+          echo "========================================"
+          echo "VERIFY compress_wasm.sh"
+          echo "========================================"
+
+          test -f compress_wasm.sh
+
+          ls -lh compress_wasm.sh
+
+          echo
+          echo "First 120 lines:"
+          sed -n '1,120p' compress_wasm.sh
+
+      # ============================================================
+      # 15. Build minimal 2D Web engine
+      # ============================================================
+      - name: Build Godot 4.7.1 engine
         env:
           CCACHE_COMPRESS: true
           CCACHE_COMPRESSLEVEL: 1
+
         run: |
+          set -e
+
           source "${EMSDK_ROOT}/emsdk_env.sh"
+
           cd godot
+
           echo "========================================"
-          echo "BUILD GODOT 4.6.2 WEB (WeChat Compatible)"
+          echo "BUILD GODOT ${GODOT_VERSION}"
           echo "========================================"
+
+          echo
+          echo "Compiler:"
+          emcc --version
+
+          echo
+          echo "SCons:"
+          scons --version
+
+          echo
+          echo "Building..."
+
           scons \
             platform=web \
             target=template_release \
@@ -156,58 +382,257 @@ jobs:
             --jobs=$(nproc)
 
       # ============================================================
-      # 8. 执行微信后处理并组装 Release 同构的 engine 产物
+      # 16. Inspect raw Web output
+      # ============================================================
+      - name: Inspect raw Web output
+        run: |
+          set -e
+
+          cd godot
+
+          echo "========================================"
+          echo "RAW WEB OUTPUT"
+          echo "========================================"
+
+          find bin -maxdepth 3 -type f \
+            \( \
+              -name "*.wasm" \
+              -o -name "*.js" \
+              -o -name "*.br" \
+            \) \
+            -exec ls -lh {} \; || true
+
+          echo
+          echo "Web zip:"
+          find bin/.web_zip -maxdepth 1 -type f -exec ls -lh {} \;
+
+      # ============================================================
+      # 17. Execute WeChat post-processing
+      # ============================================================
+      - name: Compress and post-process WASM
+        run: |
+          set -e
+
+          source "${EMSDK_ROOT}/emsdk_env.sh"
+
+          cd godot
+
+          echo "========================================"
+          echo "WECHAT POST PROCESSING"
+          echo "========================================"
+
+          sh ./compress_wasm.sh
+
+      # ============================================================
+      # 18. Verify generated WASM
+      # ============================================================
+      - name: Verify generated WASM
+        run: |
+          set -e
+
+          cd godot
+
+          echo "========================================"
+          echo "VERIFY WASM"
+          echo "========================================"
+
+          test -f bin/.web_zip/godot.wasm.br
+          test -f bin/.web_zip/godot.js
+
+          echo
+          echo "godot.js:"
+          ls -lh bin/.web_zip/godot.js
+
+          echo
+          echo "godot.wasm.br:"
+          ls -lh bin/.web_zip/godot.wasm.br
+
+          echo
+          echo "Brotli test:"
+
+          brotli -t bin/.web_zip/godot.wasm.br
+
+          echo "Brotli integrity OK."
+
+      # ============================================================
+      # 19. Verify post-processed godot.js
+      # ============================================================
+      - name: Verify post-processed godot.js
+        run: |
+          set -e
+
+          cd godot
+
+          echo "========================================"
+          echo "VERIFY GODOT.JS"
+          echo "========================================"
+
+          echo
+          echo "[1] WXMEMFS"
+
+          rg -q "FS\.mount\(WXMEMFS" \
+            bin/.web_zip/godot.js
+
+          echo "OK"
+
+          echo
+          echo "[2] nowPolyfill"
+
+          rg -q "nowPolyfill" \
+            bin/.web_zip/godot.js
+
+          echo "OK"
+
+          echo
+          echo "[3] IDBFS must NOT exist"
+
+          if rg -q "FS\.mount\(IDBFS" \
+            bin/.web_zip/godot.js; then
+
+            echo "ERROR:"
+            echo "godot.js still contains IDBFS."
+            echo "The WeChat post-processing did not complete."
+
+            exit 1
+          fi
+
+          echo "OK"
+
+      # ============================================================
+      # 20. Assemble final engine artifact
       # ============================================================
       - name: Package WeChat engine artifact
         run: |
+          set -e
+
           cd godot
 
-          # 该脚本同时生成 godot.wasm.br 并对 godot.js 执行微信兼容补丁。
-          sh ./compress_wasm.sh
+          echo "========================================"
+          echo "PACKAGE ENGINE"
+          echo "========================================"
+
+          rm -rf action-artifact
 
           mkdir -p action-artifact/engine
-          cp bin/.web_zip/godot.js action-artifact/engine/godot.js
-          cp bin/.web_zip/godot.wasm.br action-artifact/engine/godot.wasm.br
-          cp ../godot-minigame/skills/assets/min-runtime/godot-sdk.js action-artifact/engine/godot-sdk.js
-          cp ../godot-minigame/demo/wxgame/engine/game.js action-artifact/engine/game.js
 
-          # Action 产物是可直接覆盖模板 engine/ 的四个文件，不允许混入原始构建中间件。
+          cp \
+            bin/.web_zip/godot.js \
+            action-artifact/engine/godot.js
+
+          cp \
+            bin/.web_zip/godot.wasm.br \
+            action-artifact/engine/godot.wasm.br
+
+          cp \
+            ../godot-minigame/skills/assets/min-runtime/godot-sdk.js \
+            action-artifact/engine/godot-sdk.js
+
+          cp \
+            ../godot-minigame/demo/wxgame/engine/game.js \
+            action-artifact/engine/game.js
+
+      # ============================================================
+      # 21. Verify final artifact
+      # ============================================================
+      - name: Verify final engine artifact
+        run: |
+          set -e
+
+          cd godot
+
+          echo "========================================"
+          echo "FINAL ENGINE"
+          echo "========================================"
+
           test -f action-artifact/engine/godot.js
           test -f action-artifact/engine/godot.wasm.br
           test -f action-artifact/engine/godot-sdk.js
           test -f action-artifact/engine/game.js
-          test "$(find action-artifact/engine -maxdepth 1 -type f | wc -l)" -eq 4
 
-          rg -q "FS.mount\\(WXMEMFS" action-artifact/engine/godot.js
-          rg -q "nowPolyfill" action-artifact/engine/godot.js
-          rg -q "root.fsUtils = fsUtils" action-artifact/engine/godot-sdk.js
-          if rg -q "FS.mount\\(IDBFS" action-artifact/engine/godot.js; then
-            echo "godot.js was not post-processed"
+          FILE_COUNT=$(
+            find action-artifact/engine \
+              -maxdepth 1 \
+              -type f \
+              | wc -l
+          )
+
+          if [ "$FILE_COUNT" -ne 4 ]; then
+            echo "ERROR: Expected exactly 4 engine files."
+            echo "Found: $FILE_COUNT"
+            find action-artifact/engine -type f
             exit 1
           fi
 
+          echo
+          echo "Final files:"
+          find action-artifact/engine \
+            -maxdepth 1 \
+            -type f \
+            -exec ls -lh {} \;
+
+          echo
+          echo "Checking godot-sdk.js..."
+
+          rg -q \
+            "root\.fsUtils = fsUtils" \
+            action-artifact/engine/godot-sdk.js
+
+          echo "godot-sdk.js OK"
+
+          echo
+          echo "Checking game.js..."
+
+          test -s action-artifact/engine/game.js
+
+          echo "game.js OK"
+
+          echo
+          echo "========================================"
+          echo "ENGINE ARTIFACT VERIFIED"
+          echo "========================================"
+
       # ============================================================
-      # 9. 显示编译结果
+      # 22. Calculate artifact sizes
       # ============================================================
       - name: Show build results
         run: |
-          cd godot
-          echo "========================================"
-          echo "ENGINE ARTIFACT"
-          echo "========================================"
-          find action-artifact -type f -exec ls -lh {} \;
+          set -e
 
+          cd godot
+
+          echo "========================================"
+          echo "BUILD RESULTS"
+          echo "========================================"
+
+          find action-artifact \
+            -type f \
+            -exec ls -lh {} \;
+
+          echo
+          echo "Engine total size:"
+          du -sh action-artifact/engine
+
+          echo
+          echo "WASM compressed size:"
+          du -h action-artifact/engine/godot.wasm.br
+
+      # ============================================================
+      # 23. ccache statistics
+      # ============================================================
       - name: Show ccache stats
         run: |
-          ccache --show-stats
+          ccache --show-stats || true
+
+          echo
+          echo "ccache directory:"
           du -sh "$CCACHE_DIR" || true
 
       # ============================================================
-      # 10. 上传产物 (WASM + JS)
+      # 24. Upload artifact
       # ============================================================
-      - name: Upload artifacts
+      - name: Upload WeChat engine
         uses: actions/upload-artifact@v4
         with:
-          name: godot-minigame-web
+          name: godot-${{ env.GODOT_VERSION }}-wechat-web-engine
           path: godot/action-artifact/
           if-no-files-found: error
