@@ -154,9 +154,9 @@ jobs:
             --jobs=$(nproc)
 
       # ============================================================
-      # 8. 查看所有可用的模块选项（帮助后续裁剪）
+      # 8.5 查看所有可用的模块裁剪选项（仅输出，不影响构建）
       # ============================================================
-      - name: Show all module options
+      - name: List available module options
         run: |
           cd godot
           echo "========================================"
@@ -164,20 +164,18 @@ jobs:
           echo "========================================"
           scons --help | grep -E "module_.*_enabled" || true
 
+
+
+
       # ============================================================
-      # 9. 执行微信后处理并组装 Release 同构的 engine 产物
+      # 8. 执行微信后处理并组装 Release 同构的 engine 产物
       # ============================================================
       - name: Package WeChat engine artifact
         run: |
           cd godot
 
-          # 直接压缩 WASM（避免调用 compress_wasm.sh 可能出错）
-          if [ -f bin/.web_zip/godot.wasm ]; then
-            brotli --best bin/.web_zip/godot.wasm -o bin/.web_zip/godot.wasm.br
-          else
-            echo "错误: bin/.web_zip/godot.wasm 不存在，跳过压缩"
-            exit 1
-          fi
+          # 该脚本同时生成 godot.wasm.br 并对 godot.js 执行微信兼容补丁。
+          sh ./compress_wasm.sh
 
           mkdir -p action-artifact/engine
           cp bin/.web_zip/godot.js action-artifact/engine/godot.js
@@ -185,14 +183,13 @@ jobs:
           cp ../godot-minigame/skills/assets/min-runtime/godot-sdk.js action-artifact/engine/godot-sdk.js
           cp ../godot-minigame/demo/wxgame/engine/game.js action-artifact/engine/game.js
 
-          # 验证文件存在且数量正确
+          # Action 产物是可直接覆盖模板 engine/ 的四个文件，不允许混入原始构建中间件。
           test -f action-artifact/engine/godot.js
           test -f action-artifact/engine/godot.wasm.br
           test -f action-artifact/engine/godot-sdk.js
           test -f action-artifact/engine/game.js
           test "$(find action-artifact/engine -maxdepth 1 -type f | wc -l)" -eq 4
 
-          # 验证 godot.js 已包含微信适配
           rg -q "FS.mount\\(WXMEMFS" action-artifact/engine/godot.js
           rg -q "nowPolyfill" action-artifact/engine/godot.js
           rg -q "root.fsUtils = fsUtils" action-artifact/engine/godot-sdk.js
@@ -202,7 +199,7 @@ jobs:
           fi
 
       # ============================================================
-      # 10. 显示编译结果
+      # 9. 显示编译结果
       # ============================================================
       - name: Show build results
         run: |
@@ -218,7 +215,7 @@ jobs:
           du -sh "$CCACHE_DIR" || true
 
       # ============================================================
-      # 11. 上传产物 (WASM + JS)
+      # 10. 上传产物 (WASM + JS)
       # ============================================================
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
